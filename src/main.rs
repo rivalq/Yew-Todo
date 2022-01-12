@@ -190,17 +190,20 @@ struct token {
 
 #[function_component(Home)]
 fn home() -> Html {
-    let empty: Vec<Todo> = Vec::new();
     let list = use_state(|| vec![]);
-    let edit: UseStateHandle<Vec<bool>> = use_state(|| Vec::new());
+    let edit = use_state(|| vec![]);
     let value = use_state(|| "".to_string());
     {
         let list = list.clone();
+        let edit = edit.clone();
         use_effect_with_deps(
             move |_| {
                 let list = list.clone();
+                let edit = edit.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     let res = run().await.unwrap();
+                    let temp = vec![false; res.len()];
+                    edit.set(temp);
                     list.set(res);
                 });
                 || ()
@@ -208,18 +211,23 @@ fn home() -> Html {
             (),
         );
     }
-    /*let edit_title = |index: usize| {
+    let edit_title = |index: usize| {
+        let list = list.clone();
         Callback::from(move |e: Event| {
             let input: InputElement = e.target_unchecked_into();
-            (*list).borrow_mut()[index].title = input.value();
+            let mut temp = (*list).clone();
+            temp[index].title = input.value();
+            list.set(temp);
         })
     };
     let edit_done = |index: usize| {
         let edit = edit.clone();
+        let list = list.clone();
         Callback::from(move |e: MouseEvent| {
-            if (*list).borrow()[index].title != "" {
-                //    (*edit)[index] = false;
-                //    edit.set(*edit);
+            if list[index].title != "" {
+                let mut temp = (*edit).clone();
+                temp[index] = false;
+                edit.set(temp);
             }
         })
     };
@@ -227,17 +235,22 @@ fn home() -> Html {
     let toggle = |index: usize| {
         let edit = edit.clone();
         Callback::from(move |e: MouseEvent| {
-            //   (*edit)[index] = true;
-            //   edit.set(*edit);
+            let mut temp = (*edit).clone();
+            temp[index] = true;
+            edit.set(temp);
         })
-    };*/
+    };
 
     let remove = |index: usize| {
         let list = list.clone();
+        let edit = edit.clone();
         Callback::from(move |_e: MouseEvent| {
             let mut temp = (*list).clone();
+            let mut temp2 = (*edit).clone();
             temp.remove(index);
+            temp2.remove(index);
             list.set(temp);
+            edit.set(temp2);
         })
     };
 
@@ -245,14 +258,24 @@ fn home() -> Html {
     let render_item = |index: usize, value: &Todo| -> Html {
         let x = &value.title;
         html! {
+
             <li class="list-group-item d-flex justify-content-between align-items-center">
-                <div id="title-1" class="todo-title">
-                    {x}
-                </div>
+                if edit[index] {
+                    <input id="input-button-1" type="text" value = {x.clone()}  onchange = {edit_title(index.clone())}  class="form-control todo-edit-title-input" placeholder="Edit The title"/>
+                    <div id="done-button-1"  class="input-group-append">
+                        <button class="btn btn-outline-success todo-update-title" type="button" onclick = {edit_done(index.clone())} >{"Done"}</button>
+                    </div>
+                }else{
+                    <div id="title-1" class="todo-title">
+                        {x}
+                    </div>
+                }
                 <span id="title-actions-1">
-                        <button style="margin-right:5px;" type="button" class="btn btn-outline-warning">
+                    if edit[index] == false{
+                        <button style="margin-right:5px;" type="button" class="btn btn-outline-warning" onclick = {toggle(index.clone())}>
                             <img src="https://res.cloudinary.com/nishantwrp/image/upload/v1587486663/CSOC/edit.png" width="18px" height="20px"/>
                         </button>
+                    }
 
                     <button type="button" class="btn btn-outline-danger"  onclick = {remove(index.clone())} >
                         <img src="https://res.cloudinary.com/nishantwrp/image/upload/v1587486661/CSOC/delete.svg" width="18px" height="22px" />
@@ -272,12 +295,16 @@ fn home() -> Html {
     let add = {
         let list = list.clone();
         let value = value.clone();
+        let edit = edit.clone();
         Callback::from(move |e: MouseEvent| {
             let mut temp = (*list).clone();
+            let mut temp2 = (*edit).clone();
             temp.push(Todo {
                 id: 0,
                 title: (*value).clone(),
             });
+            temp2.push(false);
+            edit.set(temp2);
             list.set(temp);
             value.set("".to_string());
         })
