@@ -6,6 +6,8 @@ use yew_router::prelude::*; // 0.3.1
 
 mod storage;
 use storage::*;
+mod toast;
+use toast::*;
 
 #[derive(Clone, Routable, PartialEq)]
 enum Route {
@@ -22,7 +24,8 @@ enum Msg {
     Toggle(usize),
     Edittitle(usize, String),
     EdittitleDone(usize),
-    LoadTodos(Todos),
+    LoadTodos(Vec<Todo>),
+    UpdateList(Vec<Todo>),
 }
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 struct Todo {
@@ -38,7 +41,6 @@ struct Model {
     list: Todos,
     value: String,
     edit: Vec<bool>,
-    loaded: bool,
 }
 
 async fn run() -> Result<Vec<Todo>, Vec<Todo>> {
@@ -61,7 +63,7 @@ async fn run() -> Result<Vec<Todo>, Vec<Todo>> {
     Ok(test)
 }
 
-/*impl Component for Model {
+impl Component for Model {
     type Message = Msg;
     type Properties = ();
 
@@ -70,29 +72,59 @@ async fn run() -> Result<Vec<Todo>, Vec<Todo>> {
             list: Todos::default(),
             value: "".to_string(),
             edit: Vec::new(),
-            loaded: false,
         }
     }
 
     fn update(&mut self, _ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             Msg::LoadTodos(x) => {
-                self.list = x;
-                self.loaded = true;
+                self.edit = vec![false; x.len()];
+                self.list.list = x;
+                displaySuccess("Todos Loaded".to_string());
                 true
             }
-
+            Msg::UpdateList(x) => {
+                self.list.list = x;
+                displaySuccess("Todos Added".to_string());
+                true
+            }
             Msg::AddOne => {
                 let x = self.value.clone();
                 self.value = "".to_string();
                 if x != "" {
-                    self.list.list.push(Todo { id: 0, title: x });
+                    _ctx.link().send_future(async {
+                        let token = "Token ".to_string() + &getToken();
+                        let client = reqwest::Client::new();
+                        let mut map = HashMap::new();
+                        map.insert("title", x);
+                        let res = client
+                            .post("https://todo-app-csoc.herokuapp.com/todo/create/")
+                            .header("Authorization", &token)
+                            .json(&map)
+                            .send()
+                            .await;
+                        let new_list = run().await.unwrap();
+                        Msg::UpdateList(new_list)
+                    });
                     self.edit.push(false);
                 }
-                true
+                false
             }
             Msg::RemoveOne(x) => {
+                let id = self.list.list[x].id.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    let token = "Token ".to_string() + &getToken();
+                    let client = reqwest::Client::new();
+                    let url = format!("https://todo-app-csoc.herokuapp.com/todo/{}", id);
+                    let res = client
+                        .delete(url)
+                        .header("Authorization", &token)
+                        .send()
+                        .await;
+                    displayInfo("Todo Remove".to_string());
+                });
                 self.list.list.remove(x);
+                self.edit.remove(x);
                 true
             }
             Msg::update(x) => {
@@ -113,9 +145,28 @@ async fn run() -> Result<Vec<Todo>, Vec<Todo>> {
             }
             Msg::EdittitleDone(x) => {
                 if self.list.list[x].title != "" {
+                    let id = self.list.list[x].id.clone();
+                    let new_title = self.list.list[x].title.clone();
                     self.edit[x] = false;
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let token = "Token ".to_string() + &getToken();
+                        let client = reqwest::Client::new();
+                        let url = format!("https://todo-app-csoc.herokuapp.com/todo/{}/", id);
+                        let mut map = HashMap::new();
+                        map.insert("title", new_title);
+                        let res = client
+                            .put(url)
+                            .header("Authorization", &token)
+                            .json(&map)
+                            .send()
+                            .await;
+                        //log::info!("{:?}", res.unwrap());
+                        displaySuccess("Todo updated".to_string());
+                    });
+                    true
+                } else {
+                    false
                 }
-                true
             }
         }
     }
@@ -158,6 +209,7 @@ async fn run() -> Result<Vec<Todo>, Vec<Todo>> {
         };
 
         html! {
+            <>
             <div class = "container mt-5" style = "text-align:center">
             <h3>{"Add new Todo"}</h3>
             <div class = "row justify-content-md-center mt-3">
@@ -179,160 +231,22 @@ async fn run() -> Result<Vec<Todo>, Vec<Todo>> {
                 </div>
             </div>
         </div>
+        </>
         }
     }
-}*/
+    fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
+        if first_render {
+            ctx.link().send_future_batch(async {
+                let res = run().await.unwrap();
+                vec![Msg::LoadTodos(res)]
+            });
+        }
+    }
+}
 
 #[derive(Deserialize)]
 struct token {
     token: String,
-}
-
-#[function_component(Home)]
-fn home() -> Html {
-    let list = use_state(|| vec![]);
-    let edit = use_state(|| vec![]);
-    let value = use_state(|| "".to_string());
-    {
-        let list = list.clone();
-        let edit = edit.clone();
-        use_effect_with_deps(
-            move |_| {
-                let list = list.clone();
-                let edit = edit.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    let res = run().await.unwrap();
-                    let temp = vec![false; res.len()];
-                    edit.set(temp);
-                    list.set(res);
-                });
-                || ()
-            },
-            (),
-        );
-    }
-    let edit_title = |index: usize| {
-        let list = list.clone();
-        Callback::from(move |e: Event| {
-            let input: InputElement = e.target_unchecked_into();
-            let mut temp = (*list).clone();
-            temp[index].title = input.value();
-            list.set(temp);
-        })
-    };
-    let edit_done = |index: usize| {
-        let edit = edit.clone();
-        let list = list.clone();
-        Callback::from(move |e: MouseEvent| {
-            if list[index].title != "" {
-                let mut temp = (*edit).clone();
-                temp[index] = false;
-                edit.set(temp);
-            }
-        })
-    };
-
-    let toggle = |index: usize| {
-        let edit = edit.clone();
-        Callback::from(move |e: MouseEvent| {
-            let mut temp = (*edit).clone();
-            temp[index] = true;
-            edit.set(temp);
-        })
-    };
-
-    let remove = |index: usize| {
-        let list = list.clone();
-        let edit = edit.clone();
-        Callback::from(move |_e: MouseEvent| {
-            let mut temp = (*list).clone();
-            let mut temp2 = (*edit).clone();
-            temp.remove(index);
-            temp2.remove(index);
-            list.set(temp);
-            edit.set(temp2);
-        })
-    };
-
-    //link.callback(move |event:Event| Msg::Edittitle(index.clone(),event.target_unchecked_into::<InputElement>().value()))
-    let render_item = |index: usize, value: &Todo| -> Html {
-        let x = &value.title;
-        html! {
-
-            <li class="list-group-item d-flex justify-content-between align-items-center">
-                if edit[index] {
-                    <input id="input-button-1" type="text" value = {x.clone()}  onchange = {edit_title(index.clone())}  class="form-control todo-edit-title-input" placeholder="Edit The title"/>
-                    <div id="done-button-1"  class="input-group-append">
-                        <button class="btn btn-outline-success todo-update-title" type="button" onclick = {edit_done(index.clone())} >{"Done"}</button>
-                    </div>
-                }else{
-                    <div id="title-1" class="todo-title">
-                        {x}
-                    </div>
-                }
-                <span id="title-actions-1">
-                    if edit[index] == false{
-                        <button style="margin-right:5px;" type="button" class="btn btn-outline-warning" onclick = {toggle(index.clone())}>
-                            <img src="https://res.cloudinary.com/nishantwrp/image/upload/v1587486663/CSOC/edit.png" width="18px" height="20px"/>
-                        </button>
-                    }
-
-                    <button type="button" class="btn btn-outline-danger"  onclick = {remove(index.clone())} >
-                        <img src="https://res.cloudinary.com/nishantwrp/image/upload/v1587486661/CSOC/delete.svg" width="18px" height="22px" />
-                    </button>
-                </span>
-            </li>
-        }
-    };
-
-    let update = {
-        let value = value.clone();
-        Callback::from(move |e: Event| {
-            let input: InputElement = e.target_unchecked_into();
-            value.set(input.value());
-        })
-    };
-    let add = {
-        let list = list.clone();
-        let value = value.clone();
-        let edit = edit.clone();
-        Callback::from(move |e: MouseEvent| {
-            let mut temp = (*list).clone();
-            let mut temp2 = (*edit).clone();
-            temp.push(Todo {
-                id: 0,
-                title: (*value).clone(),
-            });
-            temp2.push(false);
-            edit.set(temp2);
-            list.set(temp);
-            value.set("".to_string());
-        })
-    };
-
-    html! {
-        <div class = "container mt-5" style = "text-align:center">
-        <h3>{"Add new Todo"}</h3>
-        <div class = "row justify-content-md-center mt-3">
-            <div class = "col-3">
-                <input class = "form-control"  type = "text" onchange = {update} value = {(*value).clone()}/>
-            </div>
-            <div class = "col-auto ms-2">
-                <button class = "btn btn-success" onclick = {add} >{"Add"}</button>
-            </div>
-        </div>
-        <div class = "row justify-content-md-center mt-3">
-            <div class = "col-4">
-                <ul id = "list" class="list-group todo-available-titles">
-                    <span class="badge badge-pill todo-available-titles-text">{"Available titles"}</span>
-                    {
-                        for list.iter().enumerate().map(|(index,value)| render_item(index,value))
-                    }
-                </ul>
-            </div>
-        </div>
-    </div>
-    }
 }
 
 #[function_component(Login)]
@@ -433,13 +347,21 @@ fn switch(routes: &Route) -> Html {
                 }
             } else {
                 html! {
-                    <Home/>
+                    <Model/>
                 }
             }
         }
-        Route::Login => html! {
-            <Login/>
-        },
+        Route::Login => {
+            if isAuthenticated() {
+                html! {
+                    <Redirect<Route> to={Route::Home}/>
+                }
+            } else {
+                html! {
+                    <Login/>
+                }
+            }
+        }
     }
 }
 
